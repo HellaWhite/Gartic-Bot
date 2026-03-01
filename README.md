@@ -1,16 +1,24 @@
+
+
+README.md
+README.md
+New
++72
+-0
+
 # Gartic Phone HyperDraw Bot
 
-An upgraded DrawBot-style bot for **Gartic Phone** with stronger color accuracy and faster drawing execution.
+An upgraded DrawBot-style bot for **Gartic Phone** with stronger color matching and faster stroke execution.
 
-## What is better vs basic bots
+## Why this version is better
 
-- **Real swatch sampling from your screen** during calibration (no blind hardcoded palette).
-- **Perceptual color matching** using **CIEDE2000**, which is notably better than raw RGB distance.
-- **Faster path planning** with run-length strokes + travel-aware ordering.
-- **Noise reduction controls** (`--min-run`, `--min-color-pixels`) to avoid wasting time on tiny details.
-- **Preview artifacts** for debugging quantization and stroke maps.
+- **Manual swatch calibration mode** (recommended): you mark every palette swatch position yourself.
+- **Grid calibration mode**: mark top-left and bottom-right swatches and auto-interpolate the rest.
+- **Screenshot-failure tolerant**: if desktop screenshot sampling fails on Linux/Wayland/X11, bot still works using fallback palette values.
+- **Perceptual color matching** via CIEDE2000.
+- **Fast drawing** using run-length segments + serpentine row ordering.
 
-> ⚠️ Educational use only. Automation may violate platform/game rules.
+> ⚠️ Educational use only. Automation may violate game rules/TOS.
 
 ## Install
 
@@ -20,54 +28,53 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 1) Calibrate
+## 1) Calibrate (important)
+
+### Recommended: manual mode (asks for more than 2 points)
 
 ```bash
-python bot.py calibrate --palette-cols 10 --palette-rows 2
+python bot.py calibrate --palette-mode manual --palette-count 12
 ```
 
-You will capture:
-
+What it asks you to mark:
 1. canvas top-left
 2. canvas bottom-right
-3. first palette swatch (top-left swatch)
-4. last palette swatch (bottom-right swatch)
+3. each swatch center one by one (12 times by default)
 
-The bot interpolates all swatch positions and samples actual RGB values from the screen into `config.json`.
+Use this mode when your palette is not a perfect grid, or when the screenshot API is unstable.
 
-## 2) Draw
+### Optional: grid mode (only 2 palette points)
+
+```bash
+python bot.py calibrate --palette-mode grid --palette-cols 10 --palette-rows 2
+```
+
+What it asks:
+1. canvas top-left
+2. canvas bottom-right
+3. palette top-left swatch
+4. palette bottom-right swatch
+
+## 2) Draw an image
 
 ```bash
 python bot.py draw ./example.png --width 420 --height 320 --speed 2.2 --preview
 ```
 
 Helpful flags:
+- `--adaptive-palette 16` (extract 16 colors from source image)
+- `--min-run 2` (skip tiny runs)
+- `--min-color-pixels 10` (skip tiny regions)
+- `--dry-run` (plan only, no mouse movement)
 
-- `--adaptive-palette 16` → extract 16 colors from image via k-means.
-- `--min-run 2` → ignore single-pixel runs for speed.
-- `--min-color-pixels 10` → skip tiny color regions.
-- `--dry-run` → planning and stats only, no mouse control.
+## If screenshot sampling crashes
 
-## Performance notes
+If you see screenshot errors during calibration (GNOME/Wayland/X11 pixbuf errors), the bot now continues by saving swatch positions and using fallback palette RGB values.
 
-This bot accelerates by reducing drag count and cursor travel:
-
-1. quantize image into a small palette,
-2. build per-color masks,
-3. convert masks into horizontal segments,
-4. order segments to reduce pen travel,
-5. draw colors with most work first.
-
-## Artifacts
-
-When using `--preview`, outputs are saved in `artifacts/`:
-
-- `quantized_preview.png`
-- `segment_overlay.png`
-- `plan_stats.json`
+You can still draw because click positions are the most important part for palette selection.
 
 ## Safety
 
-- `pyautogui.FAILSAFE` is enabled (move mouse to a screen corner to interrupt).
-- Start with small canvas sizes first.
-- Keep game window stable; UI shifts can break swatch targeting.
+- `pyautogui.FAILSAFE` is enabled (slam mouse to corner to abort).
+- Start with low size first (`--width 220 --height 160`).
+- Keep the game window fixed in place.
