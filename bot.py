@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Gartic Phone HyperDraw Bot.
 
-Designed to outperform simple DrawBot-style implementations with:
+Features:
 - Perceptual color matching (CIEDE2000)
 - Optional adaptive image palette extraction
-- Fast stroke planning with run-length encoding + path-aware ordering
-- Flexible calibration that works even when screenshot APIs fail
+- Fast stroke planning via run-length segments
+- Calibration via hover prompts or screenshot click UI
 """
 
 from __future__ import annotations
@@ -15,23 +15,16 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageDraw
 
 
-def _pyautogui():
-    import pyautogui  # type: ignore
-
-    pyautogui.FAILSAFE = True
-    pyautogui.PAUSE = 0
-    return pyautogui
-
 CONFIG_PATH = Path("config.json")
 ARTIFACTS_DIR = Path("artifacts")
 
-# Fallback colors for common Gartic-like palettes if screen sampling fails.
+# Fallback colors for common Gartic-like palettes if swatch RGB sampling fails.
 DEFAULT_GARTIC_PALETTE = [
     (20, 20, 20),
     (245, 245, 245),
@@ -46,6 +39,14 @@ DEFAULT_GARTIC_PALETTE = [
     (130, 75, 55),
     (220, 180, 150),
 ]
+
+
+def _pyautogui():
+    import pyautogui  # type: ignore
+
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0
+    return pyautogui
 
 
 @dataclass
@@ -80,8 +81,85 @@ def wait_for_enter(prompt: str) -> Tuple[int, int]:
     return int(pos.x), int(pos.y)
 
 
+def _capture_screen() -> Optional[Image.Image]:
+    try:
+        return _pyautogui().screenshot()
+    except Exception:
+        return None
+
+
+def pick_points_from_screenshot(labels: Sequence[str]) -> Optional[List[Tuple[int, int]]]:
+    """Open a screenshot click-menu and collect points in order.
+
+    Returns None when GUI/screenshot is unavailable.
+    """
+    screen = _capture_screen()
+    if screen is None:
+        return None
+
+    try:
+        import tkinter as tk
+        from PIL import ImageTk
+    except Exception:
+        return None
+
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    screen.save(ARTIFACTS_DIR / "calibration_screen.png")
+
+    max_w, max_h = 1500, 900
+    scale = min(max_w / screen.width, max_h / screen.height, 1.0)
+    view_w = max(1, int(screen.width * scale))
+    view_h = max(1, int(screen.height * scale))
+    view = screen.resize((view_w, view_h), Image.Resampling.LANCZOS) if scale < 1.0 else screen
+
+    points: List[Tuple[int, int]] = []
+    index = 0
+
+    root = tk.Tk()
+    root.title("HyperDraw Calibration - Click points in order")
+    prompt = tk.StringVar(value=f"Click: {labels[0]}")
+
+    tk.Label(root, textvariable=prompt, font=("Arial", 12, "bold")).pack(padx=8, pady=8)
+    tk.Label(
+        root,
+        text="Tip: click the exact center for swatches. Close window to cancel.",
+        font=("Arial", 10),
+    ).pack(padx=8, pady=(0, 8))
+
+    photo = ImageTk.PhotoImage(view)
+    canvas = tk.Canvas(root, width=view_w, height=view_h)
+    canvas.pack()
+    canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+
+    def on_click(event):
+        nonlocal index
+        if index >= len(labels):
+            return
+
+        ox = int(round(event.x / scale))
+        oy = int(round(event.y / scale))
+        points.append((ox, oy))
+
+        r = 4
+        canvas.create_oval(event.x - r, event.y - r, event.x + r, event.y + r, outline="lime", width=2)
+        canvas.create_text(event.x + 8, event.y - 8, text=str(index + 1), fill="lime", anchor=tk.SW)
+
+        index += 1
+        if index < len(labels):
+            prompt.set(f"Click: {labels[index]}")
+        else:
+            prompt.set("Done. Closing...")
+            root.after(250, root.destroy)
+
+    canvas.bind("<Button-1>", on_click)
+    root.mainloop()
+
+    if len(points) != len(labels):
+        return None
+    return points
+
+
 def sample_pixel_rgb(pos: Tuple[int, int]) -> Optional[Tuple[int, int, int]]:
-    """Try to sample 1 pixel from the desktop; returns None when unsupported."""
     try:
         shot = _pyautogui().screenshot(region=(pos[0], pos[1], 1, 1))
         rgb = shot.getpixel((0, 0))
@@ -96,14 +174,11 @@ def _interpolate_grid(a: Tuple[int, int], b: Tuple[int, int], cols: int, rows: i
     dy = 0 if rows == 1 else (b[1] - a[1]) / (rows - 1)
     for r in range(rows):
         for c in range(cols):
-            x = int(round(a[0] + c * dx))
-            y = int(round(a[1] + r * dy))
-            points.append((x, y))
+            points.append((int(round(a[0] + c * dx)), int(round(a[1] + r * dy))))
     return points
 
 
-def calibrate(args: argparse.Namespace) -> None:
-    print("Starting calibration")
+def _collect_points_hover(args: argparse.Namespace) -> Tuple[Tuple[int, int], Tuple[int, int], List[Tuple[int, int]]]:
     canvas_tl = wait_for_enter("Canvas top-left")
     canvas_br = wait_for_enter("Canvas bottom-right")
 
@@ -112,10 +187,48 @@ def calibrate(args: argparse.Namespace) -> None:
         swatch_b = wait_for_enter("Palette swatch bottom-right")
         swatches = _interpolate_grid(swatch_a, swatch_b, args.palette_cols, args.palette_rows)
     else:
-        swatches = []
         print(f"Manual mode: mark {args.palette_count} swatches in the same order they appear in UI.")
-        for i in range(args.palette_count):
-            swatches.append(wait_for_enter(f"Swatch {i + 1}/{args.palette_count}"))
+        swatches = [wait_for_enter(f"Swatch {i + 1}/{args.palette_count}") for i in range(args.palette_count)]
+
+    return canvas_tl, canvas_br, swatches
+
+
+def _collect_points_screenshot_ui(args: argparse.Namespace) -> Optional[Tuple[Tuple[int, int], Tuple[int, int], List[Tuple[int, int]]]]:
+    if args.palette_mode == "grid":
+        labels = [
+            "Canvas top-left",
+            "Canvas bottom-right",
+            "Palette swatch top-left",
+            "Palette swatch bottom-right",
+        ]
+        pts = pick_points_from_screenshot(labels)
+        if pts is None:
+            return None
+        canvas_tl, canvas_br, swatch_a, swatch_b = pts
+        swatches = _interpolate_grid(swatch_a, swatch_b, args.palette_cols, args.palette_rows)
+        return canvas_tl, canvas_br, swatches
+
+    labels = ["Canvas top-left", "Canvas bottom-right"] + [f"Swatch {i + 1}" for i in range(args.palette_count)]
+    pts = pick_points_from_screenshot(labels)
+    if pts is None:
+        return None
+    canvas_tl, canvas_br = pts[0], pts[1]
+    swatches = pts[2:]
+    return canvas_tl, canvas_br, swatches
+
+
+def calibrate(args: argparse.Namespace) -> None:
+    print("Starting calibration")
+    if args.palette_count < 1:
+        raise ValueError("--palette-count must be >= 1")
+
+    capture = _collect_points_screenshot_ui(args) if args.calibration_ui == "screenshot" else None
+    if capture is None:
+        if args.calibration_ui == "screenshot":
+            print("Screenshot calibration UI unavailable; falling back to hover mode.")
+        capture = _collect_points_hover(args)
+
+    canvas_tl, canvas_br, swatches = capture
 
     if args.skip_swatch_rgb_sampling:
         sampled = [None for _ in swatches]
@@ -142,7 +255,7 @@ def calibrate(args: argparse.Namespace) -> None:
         "palette_rgb": [list(rgb) for rgb in palette_rgb],
     }
     CONFIG_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"Saved calibration to {CONFIG_PATH}")
+    print(f"Saved calibration to {CONFIG_PATH} ({len(swatches)} swatches)")
 
 
 def load_calibration() -> Calibration:
@@ -151,7 +264,7 @@ def load_calibration() -> Calibration:
             "Missing config.json. Run calibration first, e.g.\n"
             "  python bot.py calibrate --palette-mode manual --palette-count 18\n"
             "or\n"
-            "  python bot.py calibrate --palette-mode grid --palette-cols 10 --palette-rows 2"
+            "  python bot.py calibrate --palette-mode grid --palette-cols 9 --palette-rows 2"
         )
     raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     return Calibration(
@@ -335,19 +448,18 @@ def execute(plan_data: DrawPlan, calib: Calibration, speed: float, dry_run: bool
 
     total_segments = sum(len(s) for s in plan_data.segments_per_color)
     print(f"Total segments: {total_segments}")
-
     if dry_run:
         return
 
     duration = max(0.0, 0.01 / max(speed, 0.1))
-
     color_order = sorted(range(len(plan_data.palette_rgb)), key=lambda i: len(plan_data.segments_per_color[i]), reverse=True)
+
+    pg = _pyautogui()
     for ci in color_order:
         segs = plan_data.segments_per_color[ci]
         if not segs or ci >= len(calib.swatches):
             continue
 
-        pg = _pyautogui()
         pg.click(calib.swatches[ci][0], calib.swatches[ci][1])
         for seg in segs:
             x0 = int(calib.canvas_tl[0] + seg.x0 * sx)
@@ -365,11 +477,16 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("calibrate", help="Capture canvas + swatches")
+    c.add_argument("--calibration-ui", choices=["screenshot", "hover"], default="screenshot")
     c.add_argument("--palette-mode", choices=["grid", "manual"], default="manual")
-    c.add_argument("--palette-cols", type=int, default=10, help="Used in grid mode")
+    c.add_argument("--palette-cols", type=int, default=9, help="Used in grid mode")
     c.add_argument("--palette-rows", type=int, default=2, help="Used in grid mode")
     c.add_argument("--palette-count", type=int, default=18, help="Used in manual mode")
-    c.add_argument("--skip-swatch-rgb-sampling", action="store_true", help="Do not screenshot swatch colors; use fallback palette RGB values")
+    c.add_argument(
+        "--skip-swatch-rgb-sampling",
+        action="store_true",
+        help="Do not screenshot swatch colors; use fallback palette RGB values",
+    )
 
     d = sub.add_parser("draw", help="Generate plan and draw image")
     d.add_argument("image", type=Path)
