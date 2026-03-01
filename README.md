@@ -1,16 +1,18 @@
 # Gartic Phone HyperDraw Bot
 
-An upgraded DrawBot-style bot for **Gartic Phone** with stronger color matching and faster stroke execution.
+A refined DrawBot-style bot for **Gartic Phone** with better color matching, faster stroke planning, and easier calibration.
 
-## Why this version is better
+## Highlights
 
-- **Manual swatch calibration mode** (recommended): you mark every palette swatch position yourself.
-- **Grid calibration mode**: mark top-left and bottom-right swatches and auto-interpolate the rest.
-- **Screenshot-failure tolerant**: if desktop screenshot sampling fails on Linux/Wayland/X11, bot still works using fallback palette values.
-- **Perceptual color matching** via CIEDE2000.
-- **Fast drawing** using run-length segments + serpentine row ordering.
+- **18 swatches by default** (`--palette-count 18`).
+- **Screenshot calibration UI** (default): click points directly on a screenshot instead of hover+Enter.
+- **Hover fallback** if screenshot UI is unavailable.
+- **Manual or grid palette capture**.
+- **Crash-tolerant swatch RGB sampling** with fallback palette values.
+- **Perceptual color matching** (CIEDE2000).
+- **Fast drawing** using run-length segments + serpentine ordering.
 
-> ⚠️ Educational use only. Automation may violate game rules/TOS.
+> ⚠️ Educational use only. Automation may violate platform/game rules.
 
 ## Install
 
@@ -20,62 +22,64 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 1) Calibrate (important)
+## 1) Calibrate
 
-### Recommended: manual mode (asks for more than 2 points)
+### Recommended (default screenshot click-menu)
 
 ```bash
 python bot.py calibrate --palette-mode manual --palette-count 18
 ```
 
-What it asks you to mark:
+This opens a screenshot-based click menu and asks for:
 1. canvas top-left
 2. canvas bottom-right
-3. each swatch center one by one (18 times by default)
+3. swatch 1..18 (in UI order)
 
-Use this mode when your palette is not a perfect grid, or when the screenshot API is unstable.
+### Grid mode (if swatches are perfectly aligned)
 
-If screenshot APIs are broken on your desktop, add:
+```bash
+python bot.py calibrate --palette-mode grid --palette-cols 9 --palette-rows 2
+```
+
+### If screenshot APIs are unstable
+
+Use hover mode:
+
+```bash
+python bot.py calibrate --calibration-ui hover --palette-mode manual --palette-count 18
+```
+
+Skip swatch RGB screenshot sampling completely:
 
 ```bash
 python bot.py calibrate --palette-mode manual --palette-count 18 --skip-swatch-rgb-sampling
 ```
 
-
-### Optional: grid mode (only 2 palette points)
-
-```bash
-python bot.py calibrate --palette-mode grid --palette-cols 10 --palette-rows 2
-```
-
-What it asks:
-1. canvas top-left
-2. canvas bottom-right
-3. palette top-left swatch
-4. palette bottom-right swatch
-
-## 2) Draw an image
+## 2) Draw
 
 ```bash
-python bot.py draw ./example.png --width 420 --height 320 --speed 2.2 --preview
+python bot.py draw ./my-image.png --width 420 --height 320 --speed 2.2 --preview
 ```
 
 Helpful flags:
-- `--adaptive-palette 16` (extract 16 colors from source image)
-- `--min-run 2` (skip tiny runs)
-- `--min-color-pixels 10` (skip tiny regions)
-- `--dry-run` (plan only, no mouse movement)
+- `--adaptive-palette 16`
+- `--min-run 2`
+- `--min-color-pixels 10`
+- `--dry-run`
 
-## If screenshot sampling crashes
+## Notes on “AI auto-detect everything”
 
-If you see screenshot errors during calibration (GNOME/Wayland/X11 pixbuf errors), the bot now continues by saving swatch positions and using fallback palette RGB values.
-If your local script still says `unrecognized arguments: --palette-mode`, you are running an older file—pull latest changes in this repo first.
+This version adds a screenshot click-menu to make calibration much easier and less error-prone.
+A fully automatic “internet-search + screen understanding” mode is intentionally not used here because it is unreliable across themes/resolutions and can break unpredictably.
 
+## Troubleshooting
 
-You can still draw because click positions are the most important part for palette selection.
+- `unrecognized arguments`: pull latest code and re-run.
+- `Image not found`: pass a real image path (e.g. `./my-image.png`).
+- Screenshot errors: use `--calibration-ui hover` and/or `--skip-swatch-rgb-sampling`.
 
 ## Safety
 
-- `pyautogui.FAILSAFE` is enabled (slam mouse to corner to abort).
-- Start with low size first (`--width 220 --height 160`).
-- Keep the game window fixed in place.
+- `pyautogui.FAILSAFE` is enabled (move mouse to corner to abort).
+- Start at low resolution first.
+- Keep the game window fixed while calibrating and drawing.
