@@ -225,17 +225,18 @@ def calibrate(args: argparse.Namespace) -> None:
     capture = _collect_points_screenshot_ui(args) if args.calibration_ui == "screenshot" else None
     if capture is None:
         if args.calibration_ui == "screenshot":
-            print("Screenshot calibration UI unavailable; falling back to hover mode.")
+            print("Screenshot calibration UI unavailable in this environment; falling back to hover mode.")
         capture = _collect_points_hover(args)
 
     canvas_tl, canvas_br, swatches = capture
 
-    if args.skip_swatch_rgb_sampling:
-        sampled = [None for _ in swatches]
-        sampled_ok: List[Tuple[int, int, int]] = []
-    else:
+    sampling_enabled = bool(args.sample_swatch_rgb) and not bool(args.skip_swatch_rgb_sampling)
+    if sampling_enabled:
         sampled = [sample_pixel_rgb(p) for p in swatches]
         sampled_ok = [c for c in sampled if c is not None]
+    else:
+        sampled = [None for _ in swatches]
+        sampled_ok: List[Tuple[int, int, int]] = []
 
     if len(sampled_ok) == len(swatches):
         palette_rgb = [c for c in sampled if c is not None]
@@ -243,7 +244,7 @@ def calibrate(args: argparse.Namespace) -> None:
     else:
         print(
             "Warning: screenshot-based color sampling failed for some/all swatches "
-            "(or was skipped). Using fallback palette values; positions are still saved."
+            "(or was skipped/disabled). Using fallback palette values; positions are still saved."
         )
         fallback = (DEFAULT_GARTIC_PALETTE * ((len(swatches) // len(DEFAULT_GARTIC_PALETTE)) + 1))[: len(swatches)]
         palette_rgb = list(fallback)
@@ -477,15 +478,20 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("calibrate", help="Capture canvas + swatches")
-    c.add_argument("--calibration-ui", choices=["screenshot", "hover"], default="screenshot")
+    c.add_argument("--calibration-ui", choices=["screenshot", "hover"], default="hover")
     c.add_argument("--palette-mode", choices=["grid", "manual"], default="manual")
     c.add_argument("--palette-cols", type=int, default=9, help="Used in grid mode")
     c.add_argument("--palette-rows", type=int, default=2, help="Used in grid mode")
     c.add_argument("--palette-count", type=int, default=18, help="Used in manual mode")
     c.add_argument(
+        "--sample-swatch-rgb",
+        action="store_true",
+        help="Attempt screenshot-based swatch RGB sampling (off by default for compatibility)",
+    )
+    c.add_argument(
         "--skip-swatch-rgb-sampling",
         action="store_true",
-        help="Do not screenshot swatch colors; use fallback palette RGB values",
+        help="Deprecated compatibility flag; sampling is already off by default",
     )
 
     d = sub.add_parser("draw", help="Generate plan and draw image")
