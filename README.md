@@ -1,11 +1,3 @@
-
-
-README.md
-README.md
-New
-+72
--0
-
 # Gartic Phone HyperDraw Bot
 
 An upgraded DrawBot-style bot for **Gartic Phone** with stronger color matching and faster stroke execution.
@@ -43,6 +35,13 @@ What it asks you to mark:
 
 Use this mode when your palette is not a perfect grid, or when the screenshot API is unstable.
 
+If screenshot APIs are broken on your desktop, add:
+
+```bash
+python bot.py calibrate --palette-mode manual --palette-count 12 --skip-swatch-rgb-sampling
+```
+
+
 ### Optional: grid mode (only 2 palette points)
 
 ```bash
@@ -70,6 +69,8 @@ Helpful flags:
 ## If screenshot sampling crashes
 
 If you see screenshot errors during calibration (GNOME/Wayland/X11 pixbuf errors), the bot now continues by saving swatch positions and using fallback palette RGB values.
+If your local script still says `unrecognized arguments: --palette-mode`, you are running an older file—pull latest changes in this repo first.
+
 
 You can still draw because click positions are the most important part for palette selection.
 
