@@ -149,7 +149,7 @@ def load_calibration() -> Calibration:
     if not CONFIG_PATH.exists():
         raise FileNotFoundError(
             "Missing config.json. Run calibration first, e.g.\n"
-            "  python bot.py calibrate --palette-mode manual --palette-count 12\n"
+            "  python bot.py calibrate --palette-mode manual --palette-count 18\n"
             "or\n"
             "  python bot.py calibrate --palette-mode grid --palette-cols 10 --palette-rows 2"
         )
@@ -368,7 +368,7 @@ def parse_args() -> argparse.Namespace:
     c.add_argument("--palette-mode", choices=["grid", "manual"], default="manual")
     c.add_argument("--palette-cols", type=int, default=10, help="Used in grid mode")
     c.add_argument("--palette-rows", type=int, default=2, help="Used in grid mode")
-    c.add_argument("--palette-count", type=int, default=12, help="Used in manual mode")
+    c.add_argument("--palette-count", type=int, default=18, help="Used in manual mode")
     c.add_argument("--skip-swatch-rgb-sampling", action="store_true", help="Do not screenshot swatch colors; use fallback palette RGB values")
 
     d = sub.add_parser("draw", help="Generate plan and draw image")
@@ -390,6 +390,12 @@ def main() -> None:
     if args.cmd == "calibrate":
         calibrate(args)
         return
+
+    if not args.image.exists():
+        raise FileNotFoundError(
+            f"Image not found: {args.image}\n"
+            "Pass a valid image path, e.g. `python bot.py draw ./my-image.png ...`"
+        )
 
     calibration = load_calibration()
     palette = np.array(calibration.palette_rgb, dtype=np.uint8)
