@@ -117,16 +117,20 @@ def calibrate(args: argparse.Namespace) -> None:
         for i in range(args.palette_count):
             swatches.append(wait_for_enter(f"Swatch {i + 1}/{args.palette_count}"))
 
-    sampled: List[Optional[Tuple[int, int, int]]] = [sample_pixel_rgb(p) for p in swatches]
-    sampled_ok = [c for c in sampled if c is not None]
+    if args.skip_swatch_rgb_sampling:
+        sampled = [None for _ in swatches]
+        sampled_ok: List[Tuple[int, int, int]] = []
+    else:
+        sampled = [sample_pixel_rgb(p) for p in swatches]
+        sampled_ok = [c for c in sampled if c is not None]
 
     if len(sampled_ok) == len(swatches):
         palette_rgb = [c for c in sampled if c is not None]
         print(f"Sampled all {len(palette_rgb)} swatch RGB values successfully.")
     else:
         print(
-            "Warning: screenshot-based color sampling failed for some/all swatches. "
-            "Using fallback palette values; positions are still saved."
+            "Warning: screenshot-based color sampling failed for some/all swatches "
+            "(or was skipped). Using fallback palette values; positions are still saved."
         )
         fallback = (DEFAULT_GARTIC_PALETTE * ((len(swatches) // len(DEFAULT_GARTIC_PALETTE)) + 1))[: len(swatches)]
         palette_rgb = list(fallback)
@@ -143,7 +147,12 @@ def calibrate(args: argparse.Namespace) -> None:
 
 def load_calibration() -> Calibration:
     if not CONFIG_PATH.exists():
-        raise FileNotFoundError("Missing config.json. Run `python bot.py calibrate` first.")
+        raise FileNotFoundError(
+            "Missing config.json. Run calibration first, e.g.\n"
+            "  python bot.py calibrate --palette-mode manual --palette-count 12\n"
+            "or\n"
+            "  python bot.py calibrate --palette-mode grid --palette-cols 10 --palette-rows 2"
+        )
     raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     return Calibration(
         canvas_tl=tuple(raw["canvas_tl"]),
@@ -360,6 +369,7 @@ def parse_args() -> argparse.Namespace:
     c.add_argument("--palette-cols", type=int, default=10, help="Used in grid mode")
     c.add_argument("--palette-rows", type=int, default=2, help="Used in grid mode")
     c.add_argument("--palette-count", type=int, default=12, help="Used in manual mode")
+    c.add_argument("--skip-swatch-rgb-sampling", action="store_true", help="Do not screenshot swatch colors; use fallback palette RGB values")
 
     d = sub.add_parser("draw", help="Generate plan and draw image")
     d.add_argument("image", type=Path)
